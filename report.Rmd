@@ -1,0 +1,377 @@
+```{r setup, include=FALSE}
+#Loading packages
+library(tidyverse)
+library(readxl)
+library(dplyr)
+library(ggcorrplot)
+library(ggplot2)
+library(ggpubr)
+#Data import
+Turtle<-read_excel('/Users/sunxiaotan/Desktop/STA490/Project/turtles_annual_data.xls')
+options(warn = - 1) 
+```
+
+## Variable definitions
+
+After data cleaning(process shown in Data cleaning section), the remaining variables are:
+
+\begin{table}[]
+\begin{tabular}{ll}
+\hline
+\multicolumn{1}{|l|}{Variable} & \multicolumn{1}{l|}{Description}                                                                                          \\ \hline
+age                            & Estimated age, not reliable                                                                                               \\
+sex                            & Either UNKNOWN (immature individuals can't be sexed), or Male, or Female                                                  \\
+juv                            & Logical, whether the turtle is juvenile or not                                                                            \\
+site                           & Site where turtle is found                                                                                                \\
+gravid                         & Logical, if the turtle was found gravid (i.e., with eggs in her belly) in that year                                       \\
+nest                           & Logical, if we recorded one nest from that individual in that year                                                        \\
+secnest                        & Logical, if a second nest was laid in a given year                                                                        \\
+mass                           & Weight of the turtle                                                                                                      \\
+midcl                          & Carapace length (Measured from between the anterior-most carapacial scutes to between the postior-most carapacial scutes) \\
+midpl                          & Plastron length (Measured from between the anterior-most plastral scutes to between the postior-most plastral scutes)     \\
+cw                             & The width of the widest portion of the carapace                                                                           \\
+ch                             & The height of the turtle, measured from the bottom of the plastron to the top of the carapace.                           
+\end{tabular}
+\end{table}
+
+
+### Data cleaning
+
+First thing we are doing is dropping 14 irrelevant variables: ‘yearjuv’, ‘repro’, ‘C’, ‘P’, ‘cannuli’, ‘pannuli’, ‘name’, ‘Permanent 9-11’, ‘Permanent 11-13’, ‘Permanent 13-15’, ‘Permanent 15+’, ‘VB age estimation’, ‘C’’, ‘P’’. Even researchers don’t know what they are. 
+
+```{r,echo=FALSE}
+#Drop irrelevant columns
+Turtle=Turtle[,-c(10,14,31,32,33,34,35,36,37,38,39,40,41,42)]
+```
+
+By checking the number of missing values in ‘notch’, I discover that there’s none which means notching system succeeds through the research. Since notching system is working well while painted turtle ID could have a risk of being modified or erased. I drop the variable ‘Turtle ID’ and use ‘notch’ as the exclusive identification.
+
+```{r,echo=FALSE}
+#Since notching system works pretty well, no need for 'Turtle ID'
+Turtle=Turtle[,-2]
+```
+
+Next step is splitting dataset into ‘age known’ and ‘age unknown’. Since the objective of our EDA focuses on the life span of turtle, data is useless if we don’t know the age of turtles. I will be only looking at data with known age. After the splitting, there are still 11 out of 2479 observations with missing age. As the proportion of missing value is small, I decide to remove these observations.
+
+```{r,echo=FALSE}
+#Separate dataset into age known and age unknown
+split_turtle<-split(Turtle,Turtle$`known age`)
+known<-split_turtle[2][[1]]
+unknown<-split_turtle[1][[1]]
+#Count NAs in age, since relatively small comparing to sample size, remove these rows
+known=known[-c(116,119,233,236,353,469,697,959,1077,1193,1258),]
+```
+
+Following the previous step, I removed duplicated observations from a single turtle and only kept the latest record. By initial observation, there are records of turtles with same ‘notch’ which means data came from exactly the same turtle. However, it's due to the constant updating of the data without dropping the old ones. In order to do this, I sorted the data in descending order by age and used function distinct() to remove duplicated observations. It is crucial to sort in descending orders by age because function distinct() only keeps the first of a bunch of duplication by default. Since I want the latest record of each turtle, the observation with greatest age is what I’m looking for. Although some variables that record the annual activity of individual turtle might lost, we successfully solve the dependency problem. It is necessary to make a concession because, in most cases, independence between observations is the most important assumption to be made before carrying out further analysis. I’ve also removed an observation with wrong input ‘-’ in variable ‘sex'.  Now, the data is whittled down to 383 observations which is close to the 400 total in Algonquin park introduced in last section. 
+
+```{r,echo=FALSE}
+#Remove duplicated data from one turtle and keep the latest record only
+#Descending order in age
+known<-known[with(known,order(-age)),]
+#Remove duplicated rows by notch, keep the first by default(exactly why we sort in descending order to make sure we have the latest record for duplicated individuals). Drop the last one since age is NA.
+distinct<-known%>%distinct(notch,.keep_all = TRUE)
+#Remove one weird sex record '-'
+distinct<-distinct[distinct$sex !='-',]
+```
+
+At this point, our data is properly classified by some aspects. To further refine our data, I continued to discard some of the variables. ‘notch’ and ‘known age’ are discarded since they’ve already been used in previous classification approaches; ‘Year of birth’ and ‘Year’ are discarded because they can be perfectly replaced by ‘age’; ‘Unique site’ is discarded because it can be replaced by ‘site’; ‘date’, ‘Julian date’, ‘nestdate’, ‘nest2date’, ‘firstcap’, ‘dead’ are discarded since they are irrelevant to our research objective. So far, we have 16 variables left.
+
+```{r,echo=FALSE}
+#Keep useful variables
+distinct<-distinct[,-c(1,2,3,4,5,9,10,14,16,17,27)]
+```
+
+Finally, I counted the sum of missing values in these remaining variables and their ratios to total observations. I set a threshold of 7% to decide whether or not to remove these variables with missing values. There are two reasons for this decision: first, replacing a large percentage of missing data with replacement data can have a huge impact on the original data; second, if we let our system to carry out analysis with automatically neglected missing values, the variances of estimates will be huge. 
+
+‘cl’, ‘pl’ are removed since their ratio of missing value reach approximately 20%; ‘lclaw’, ‘rclaw’ are removed since their ratio reach 57% and 66% respectively. Among the 12 remaining variables, 5 of them have low ratio of missing value(less than 7%). I decide to use sample mean without missing values to replace them in order to minimize the impact on original data.
+
+```{r,echo=FALSE}
+#Check numbers of NAs in each columns,remove variables with high NA percentage(say above 7%)
+na<-rep(0,16)
+for (i in 1:16){
+  na[i]<-sum(is.na(distinct[,i]))
+}
+na<-tibble(na,na/383)
+distinct<-distinct[,-c(9,10,13,14)]
+#Replace missing values by the sample means, 5 variables have missing values.
+list_na<-colnames(distinct)[apply(distinct,2,anyNA)]
+average_missing<-apply(distinct[,colnames(distinct)%in%list_na],2,mean,na.rm=TRUE)
+distinct<-distinct%>%mutate(mass=ifelse(is.na(mass),average_missing[1],mass),midcl=ifelse(is.na(midcl),average_missing[2],midcl),midpl=ifelse(is.na(midpl),average_missing[3],midpl),cw=ifelse(is.na(cw),average_missing[4],cw),ch=ifelse(is.na(ch),average_missing[5],ch))
+```
+
+
+### Preliminary insights
+
+First look at some facts of variable 'age':
+
+```{r,echo=FALSE}
+#Summary of 'age'
+summary(distinct$age)
+```
+
+Normality is one of the four key assumptions for linear regression. As I am going to conduct linear regression analysis to investigate our question of interest, it is essential to check the normality of our response variable ‘age’ in advance. I use normal QQ-plot and Shapiro-wilk test to check normality. According to the output, neither of the test results suggest age follows a normal distribution.
+
+```{r,echo=FALSE}
+#Normality check--Not normally distributed (QQ-plot, Shapiro-Wilk test)
+ggqqplot(distinct$age)
+shapiro.test(distinct$age)
+```
+
+Next, by plotting the histogram and density of age, it is clear that ‘age’ has a right-skewed distribution. 
+
+```{r,echo=FALSE}
+#Density plot & Histogram
+plot(density(distinct$age),main = 'Density of Age')
+hist(distinct$age,main = 'Histogram of Age',xlab = 'Age')
+```
+
+## Insightful view of 'age'
+I start with checking the respective relationships between age and categorical variables ‘sex’, ‘site’ by using side-by-side Boxplots.
+
+# age by sex
+
+```{r,echo=FALSE}
+#Box plot--age vs sex
+boxplot(age~sex,distinct,main='Age distribution for different Sex')
+```
+
+From this graph we can see that female’s age has a greater IQR which means it is more spread-out than male’s age. Both female and male have an approximately symmetric distribution. The distribution of unknown sex group is right-skewed. There are some outliers for male and unknown sex group but there's none for female group. The graph might suggest that female has longer life span than male but this is not significant as they overlap with each other. However, age of male and female groups are significantly higher than unknown sex group. This is indeed straightforward as I mentioned in introduction that sex are mostly undetermined in juvenile phase of turtles.
+
+# age by site
+
+```{r,echo=FALSE}
+#Box plot--age vs site
+boxplot(age~site,distinct,names=c('BB','Bp','H60','MHL','Other','RWHP','WR','WHP','WHP.E'),horizontal = TRUE,las=2,main='Age distribution for different Sites')
+```
+
+From the graph we can tell that most data are collected from ‘Wolf Howl Pond E’, ‘Wolf Howl Pond’ and ‘West Rose’. Wolf Howl Pond E’ and ‘Wolf Howl Pond’ are more spread-out; Wolf Howl Pond E’ and ‘West Rose’ seems to have same life span which is sightly higher than ‘Wolf Howl Pond’ but all are not considered to be statistically significant. Data collected from ‘Wolf Howl Pond E’ and ‘Wolf Howl Pond’ are right-skewed while data collected from 'West Rose' is approximately symmetric with a bunch of outliers. Other than these three major sites, data collected from other sites are too small to draw any insightful conclusion.
+
+# age by gravid
+
+```{r,echo=FALSE}
+#Box plot--age vs gravid
+boxplot(age~gravid,distinct,main='Age distribution for gravid turtles and non-gravid turtles')
+```
+
+Age of gravid turtles is significantly higher than turtles not gravid. This is probably due to the special physiological nature of the turtles. The age of gravid turtles have approximately symmetric distribution while turtles not gravid is right-skewed with few outliers.
+
+# age by nest, age by secnest
+
+```{r,echo=FALSE}
+#Box plot--age vs nest
+boxplot(age~nest,distinct,main='Age distribution of nesting turtles and non-nesting turtles')
+#Box plot--age vs secnest
+boxplot(age~secnest,distinct,main='Age distribution for second nesting turtles and non-second nesting turtles')
+```
+
+Age of turtles recorded to nest and second nest at specific year are also significantly higher than these not. Perhaps this is also due to the special physiological nature of the turtles. Age of turtles that not recorded to nest or second nest have right-skewed distribution with some outliers. Age of turtles recorded to nest or second nest have approximately symmetric distribution. The distribution of age of nested turtles are more spreadout than the distribution of second nested turtles.
+
+## Linear relationship between two variables
+
+I fitted linear regression lines to check the respective relationships between age and numerical variables ‘mass’, ‘midcl’, ‘midpl’, ‘cw’, ‘ch’.
+
+# age vs mass (by sex)
+
+```{r,echo=FALSE}
+#Age vs mass by sex
+ggplot(distinct, aes(x = mass, y = age, color = sex) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = sex))+ggtitle('Age versus mass for each sex')
+```
+
+Since all the slopes are positive, we can say that there's a positive relationship between age and mass for all sex groups. Male turtles seems to have approximately same slope as juveniles. Female turtles seems to have the steepest slope which means the greatest marginal increase in age for per unit increase in mass. In other words, the growth in mass by per unit increase in age is greater for male and juvenile turtles while the growth rate of mass for female turtles are relatively slower. However, the variances for male turtles are big on tails which is caused by limited accessible data and outliers. This might affect the reliability of initial analysis.
+
+# age vs midcl,midpl,cw,ch (by sex)
+
+```{r,echo=FALSE}
+#Age vs midcl by sex
+ggplot(distinct, aes(x = midcl, y = age, color = sex) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = sex))+ggtitle('Age versus midcl for each sex')
+#Age vs midpl by sex
+ggplot(distinct, aes(x = midpl, y = age, color = sex) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = sex))+ggtitle('Age versus midpl for each sex')
+#Age vs cw by sex
+ggplot(distinct, aes(x = cw, y = age, color = sex) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = sex))+ggtitle('Age versus cw for each sex')
+#Age vs ch by sex
+ggplot(distinct, aes(x = ch, y = age, color = sex) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = sex))+ggtitle('Age versus ch for each sex')
+```
+
+The four plots look similar. Since all the slopes are positive, we can say that there's a positive relationship between age and midcl, midpl, cw, ch for all sex groups. For each of the four plots, female turtle seems to have the steepest slope which means the greatest marginal increase in age for per unit increase in midcl, midpl, cw, ch. In other words, the growth in midcl, midpl, cw, ch by per unit increase in age is greater for male and juvenile turtles while the growth rates for female turtles are relatively slower. The variances for male and female turtles are large due to outliers and small sample sizes. The results are in accord with the facts about turtles that they grow throughout their entire life.
+
+# age vs mass, midcl, midpl, cw, ch (by site)
+
+```{r,echo=FALSE}
+#Age vs mass by site, some missing values due to lack of data for certain sites
+ggplot(distinct, aes(x = mass, y = age, color = site) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = site))+ggtitle('Age versus mass for each site')
+#Age vs midcl by site
+ggplot(distinct, aes(x = midcl, y = age, color = site) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = site))+ggtitle('Age versus midcl for each site')
+#Age vs midpl by site
+ggplot(distinct, aes(x = midpl, y = age, color = site) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = site))+ggtitle('Age versus midpl for each site')
+#Age vs cw by site
+ggplot(distinct, aes(x = cw, y = age, color = site) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = site))+ggtitle('Age versus cw for each site')
+#Age vs ch by site
+ggplot(distinct, aes(x = ch, y = age, color = site) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = site))+ggtitle('Age versus ch for each site')
+```
+
+Since all slopes are  positive, we can again say that the age has a positive relationship with mass, midcl, midpl, cw, ch. The slopes of age vs mass, midcl, midpl, cw, ch are approximately the same for each site which suggests that sites might not be a significant factor that affects age of turtles. The big variances are caused by lack of samples for certain sites and outliers. Except the three major sites: ‘Wolf Howl Pond E’, ‘Wolf Howl Pond’ and ‘West Rose’, other sites are not providing insightful information towards our analysis.
+
+# Correlation heat plot
+
+```{r,echo=FALSE}
+#Correlation
+numerical<-distinct[,-c(2,4)]
+cor(numerical)
+ggcorrplot(cor(numerical))+ggtitle('Correlation heat plot for non-character variables')
+```
+
+The correlation heat plot provides a general view over the relationship between binary and numerical variables. From the graph we can see that age is highly correlated with mass, midcl, midpl, cw and ch. Age is also negatively correlated with juvenile which is straight forward. Age is weakly correlated with gravid, nest and secnest.
+
+### Next step
+
+So far, I refine the data to get some conclusions. There are few **follow up questions**:
+
+1. Is it proper to eliminate duplicated data? As I mentioned, although this solves the dependence problem between observations, it also brings up irreversible loss to variables such as ‘site’, ‘nest’, ‘secnest’, ‘gravid’. How to manage the tradeoff is the first task I need to solve.
+
+2. Is there a better way to deal with missing values? For large ratio of missing values, I throw away the entire variable. For small ratio of missing values, I use sample means to replace them. However, they might not be the optimal choice.
+
+3. According to our collaborator, 'age' is not a reliable variable. If we want to investigate on life span of turtle with a reliable variable, what could be the substitute for 'age'?
+
+There are few **possible next steps**:
+
+1. According the right-skewed density of variable ‘age’, as well as the positive integer nature, it could be modelled by poisson distribution. Therefore performing a generalized linear model with log-link function might be a good way to carry out further analysis.
+
+2. Extract important information and features of the complex data by using Principle Component Analysis. This helps us quickly identify the important directions of dataset which is more worthwhile for future research. However, the challenge is that it is hard to translate the result of PCA to audiences, especially non-stat experts.
+
+3. Remove sites with few sample sizes from the model.
+
+### Appendix
+```{r}
+#Loading packages
+library(tidyverse)
+library(readxl)
+library(dplyr)
+library(ggcorrplot)
+library(ggplot2)
+library(ggpubr)
+#Data import
+Turtle<-read_excel('/Users/sunxiaotan/Desktop/STA490/Project/turtles_annual_data.xls')
+options(warn = - 1) 
+
+
+#Drop irrelevant columns
+Turtle=Turtle[,-c(10,14,31,32,33,34,35,36,37,38,39,40,41,42)]
+#Since notching system works pretty well, no need for 'Turtle ID'
+sum(is.na(Turtle$notch))
+Turtle=Turtle[,-2]
+#Separate dataset into age known and age unknown
+sum(is.na(Turtle$`known age`))
+sum(Turtle$`known age`==TRUE)
+sum(Turtle$`known age`==FALSE)
+split_turtle<-split(Turtle,Turtle$`known age`)
+known<-split_turtle[2][[1]]
+unknown<-split_turtle[1][[1]]
+#Count NAs in age, since relatively small comparing to sample size, remove these rows
+sum(is.na(known$age))
+which(is.na(known$age))
+known=known[-c(116,119,233,236,353,469,697,959,1077,1193,1258),]
+#Remove duplicated data from one turtle and keep the latest record only
+#Descending order in age
+known<-known[with(known,order(-age)),]
+#Remove duplicated rows by notch, keep the first by default(exactly why we sort in descending order to make sure we have the latest record for duplicated individuals). Drop the last one since age is NA.
+distinct<-known%>%distinct(notch,.keep_all = TRUE)
+#Remove one weird sex record '-'
+distinct<-distinct[distinct$sex !='-',]
+#Keep useful variables
+distinct<-distinct[,-c(1,2,3,4,5,9,10,14,16,17,27)]
+#Check numbers of NAs in each columns,remove variables with high NA percentage(say above 7%)
+na<-rep(0,16)
+for (i in 1:16){
+  na[i]<-sum(is.na(distinct[,i]))
+}
+na<-tibble(na,na/383)
+distinct<-distinct[,-c(9,10,13,14)]
+#Replace missing values by the sample means, 5 variables have missing values.
+list_na<-colnames(distinct)[apply(distinct,2,anyNA)]
+average_missing<-apply(distinct[,colnames(distinct)%in%list_na],2,mean,na.rm=TRUE)
+distinct<-distinct%>%mutate(mass=ifelse(is.na(mass),average_missing[1],mass),midcl=ifelse(is.na(midcl),average_missing[2],midcl),midpl=ifelse(is.na(midpl),average_missing[3],midpl),cw=ifelse(is.na(cw),average_missing[4],cw),ch=ifelse(is.na(ch),average_missing[5],ch))
+
+
+#Summary of 'age'
+summary(distinct$age)
+#Normality check--Not normally distributed (QQ-plot, Shapiro-Wilk test)
+ggqqplot(distinct$age)
+shapiro.test(distinct$age)
+#Density plot & Histogram
+plot(density(distinct$age),main = 'Density of Age')
+hist(distinct$age,main = 'Histogram of Age',xlab = 'Age')
+#Box plot--age vs sex
+boxplot(age~sex,distinct,main='Age distribution for different Sex')
+#Box plot--age vs site
+boxplot(age~site,distinct,names=c('BB','Bp','H60','MHL','Other','RWHP','WR','WHP','WHP.E'),horizontal = TRUE,las=2,main='Age distribution for different Sites')
+#Box plot--age vs gravid
+boxplot(age~gravid,distinct,main='Age distribution for gravid turtles and non-gravid turtles')
+#Box plot--age vs nest
+boxplot(age~nest,distinct,main='Age distribution of nesting turtles and non-nesting turtles')
+#Box plot--age vs secnest
+boxplot(age~secnest,distinct,main='Age distribution for second nesting turtles and non-second nesting turtles')
+#Age vs mass by sex
+ggplot(distinct, aes(x = mass, y = age, color = sex) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = sex))+ggtitle('Age versus mass for each sex')
+#Age vs midcl by sex
+ggplot(distinct, aes(x = midcl, y = age, color = sex) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = sex))+ggtitle('Age versus midcl for each sex')
+#Age vs midpl by sex
+ggplot(distinct, aes(x = midpl, y = age, color = sex) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = sex))+ggtitle('Age versus midpl for each sex')
+#Age vs cw by sex
+ggplot(distinct, aes(x = cw, y = age, color = sex) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = sex))+ggtitle('Age versus cw for each sex')
+#Age vs ch by sex
+ggplot(distinct, aes(x = ch, y = age, color = sex) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = sex))+ggtitle('Age versus ch for each sex')
+#Age vs mass by site, some missing values due to lack of data for certain sites
+ggplot(distinct, aes(x = mass, y = age, color = site) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = site))+ggtitle('Age versus mass for each site')
+#Age vs midcl by site
+ggplot(distinct, aes(x = midcl, y = age, color = site) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = site))+ggtitle('Age versus midcl for each site')
+#Age vs midpl by site
+ggplot(distinct, aes(x = midpl, y = age, color = site) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = site))+ggtitle('Age versus midpl for each site')
+#Age vs cw by site
+ggplot(distinct, aes(x = cw, y = age, color = site) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = site))+ggtitle('Age versus cw for each site')
+#Age vs ch by site
+ggplot(distinct, aes(x = ch, y = age, color = site) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .15, aes(fill = site))+ggtitle('Age versus ch for each site')
+#Correlation
+numerical<-distinct[,-c(2,4)]
+cor(numerical)
+ggcorrplot(cor(numerical))+ggtitle('Correlation heat plot for non-character variables')
+```
