@@ -1,4 +1,4 @@
-# Turtle_survival_project
+# Cross-disciplinary Research Project: Investigate the Survival Rate of Turtles
 
 ### Introduction
 
@@ -7,3 +7,8 @@ The Algonquin turtle life history project focuses on finding out related factors
 According to some research findings, we can get a glimpse of some of the characteristics of painted turtles: There are about 400 painted turtles in Algonquin park, more of them adults than juveniles; Turtles emerge in May, nest between June and July, hatch between August and September; Female painted turtles are generally bigger than male while male has longer claws; Turtles grow after maturity throughout their entire life. 
 
 The research question is: **what are the significant factors that contribute to the life span of turtles.**
+
+### Methods
+1. Applied Spatial Data Analysis to explore geographical variation across multiple species and quantify the spatial effect on survival
+2. Implemented ARIMA Time Series Analysis Model to explore the trend and systematic pattern in survival data over time
+3. Conducted Survival Analysis with the Open-population Cormack-Jolly-Seber Model, successfully identified eight significant factors from more than fifty exposures
